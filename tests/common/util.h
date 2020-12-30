@@ -71,6 +71,12 @@ void init_zeros(std::vector<T>& x) {
     x[i] = 0;
 }
 
+template<class T>
+void init_ones(std::vector<T>& x) {
+  for(size_t i = 0; i < x.size(); i++)
+    x[i] = 1;
+}
+
 /* ------------------------
  *       Loop Nests
  * ------------------------ */

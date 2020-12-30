@@ -1272,7 +1272,7 @@ void generator::visit_reduce_inst(ir::reduce_inst* x) {
       }
       case ir::reduce_inst::FADD: return builder_->CreateFAdd(x, y);
       case ir::reduce_inst::FSUB: return builder_->CreateFSub(x, y);
-    case ir::reduce_inst::FMAX: return builder_->CreateCall(fmax, std::vector<llvm::Value*>{x, y});
+      case ir::reduce_inst::FMAX: return builder_->CreateCall(fmax, std::vector<llvm::Value*>{x, y});
       case ir::reduce_inst::FMIN: return builder_->CreateCall(fmin, std::vector<llvm::Value*>{x, y});
       default: assert(false); return nullptr;
     }
@@ -1292,16 +1292,10 @@ void generator::visit_reduce_inst(ir::reduce_inst* x) {
   }
 
 
-
   analysis::data_layout* arg_layout = layouts_->get(arg);
   if(auto* L = dynamic_cast<analysis::scanline_layout*>(arg_layout)){
     bool can_optimize = L->get_rank() == 1;
-    /*
-    for(size_t r = 0; r < L->get_rank(); r++){
-      if(r != axis)
-        can_optimize = can_optimize && (L->mts(r) == L->get_shape()[r]);
-    }
-    */
+
     if(can_optimize){
       Value *thread_acc = nullptr;
       // reduce within thread
@@ -1322,26 +1316,31 @@ void generator::visit_reduce_inst(ir::reduce_inst* x) {
       unsigned addr_space = sh_mem_ptr_->getType()->getPointerAddressSpace();
       Type *res_ty = arg_tile->get_ty();
       Value *sh_mem_ptr = builder_->CreateBitCast(sh_mem_ptr_, PointerType::get(res_ty, addr_space));
-      Value* u_thread_id = tgt_->get_local_id(builder_->GetInsertBlock()->getModule(), *builder_, 0);
-      Value* warp_id = builder_->CreateUDiv(u_thread_id, builder_->getInt32(32));
+      Value* thread_id = tgt_->get_local_id(builder_->GetInsertBlock()->getModule(), *builder_, 0);
+      Value* warp_id = builder_->CreateUDiv(thread_id, builder_->getInt32(32));
+      Value* lane_id = builder_->CreateURem(thread_id, builder_->getInt32(32));
       Value *write_ptr = builder_->CreateGEP(sh_mem_ptr, warp_id);
       // store warp result in shared memory
+      tgt_->add_barrier(mod_, *builder_);
+      builder_->CreateStore(neutral, builder_->CreateGEP(sh_mem_ptr, lane_id));
       tgt_->add_barrier(mod_, *builder_);
       builder_->CreateStore(warp_acc, write_ptr);
       tgt_->add_barrier(mod_, *builder_);
       // accumulate all warps
-      Value *load_ptr = builder_->CreateGEP(sh_mem_ptr, u_thread_id);
+      Value *load_ptr = builder_->CreateGEP(sh_mem_ptr, thread_id);
       Value* is_first_warp = builder_->CreateICmpEQ(warp_id, builder_->getInt32(0));
       BasicBlock* bb_final_acc = BasicBlock::Create(*ctx_, "bb_final_acc", builder_->GetInsertBlock()->getParent());
       BasicBlock* bb_final_acc_done = BasicBlock::Create(*ctx_, "bb_final_acc_done", builder_->GetInsertBlock()->getParent());
       builder_->CreateCondBr(is_first_warp, bb_final_acc, bb_final_acc_done);
       builder_->SetInsertPoint(bb_final_acc);
       Value* final_val = builder_->CreateLoad(load_ptr);
-      for(int i = (num_warps_+1)/2; i > 0; i >>= 1)
-        final_val = accumulate(final_val, builder_->CreateCall(shfl_xor, std::vector<llvm::Value*>{final_val, builder_->getInt32(i)}));
+      for(int i = (num_warps_+1)/2; i > 0; i >>= 1){
+        Value *current = builder_->CreateCall(shfl_xor, std::vector<llvm::Value*>{final_val, builder_->getInt32(i)});
+        final_val = accumulate(final_val, current);
+      }
       builder_->CreateStore(final_val, load_ptr);
       builder_->CreateBr(bb_final_acc_done);
-//      // store first warp done
+      // store first warp done
       builder_->SetInsertPoint(bb_final_acc_done);
       // write back
       tgt_->add_barrier(mod_, *builder_);
