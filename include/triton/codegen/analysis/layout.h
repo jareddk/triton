@@ -77,9 +77,10 @@ public:
   const order_t& get_order() const    { return order_; }
   const values_t& get_values() const  { return values_;}
   int get_axis(size_t k) const        { return axes_.at(k); }
+  std::vector<int> get_axes() const		{ return axes_; }
   const int get_order(size_t k) const { return order_.at(k); }
   // find the position of given axis
-  size_t find_axis(int to_find) const;
+  int find_axis(int to_find) const;
 
 
 private:

@@ -122,7 +122,7 @@ void triton_reduce_nd(drv::context* context, drv::stream* stream, const std::vec
     RED += (n==axis) ? to_str(op) : ":";
   }
   opt.defines.push_back({"RED", {RED}});
-  opt.num_warps = {1};
+  opt.num_warps = {2};
 
   // kernel
   rt::function function(src::reduce_nd[rank_x - 1], opt);

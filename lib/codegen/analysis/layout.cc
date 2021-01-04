@@ -115,8 +115,10 @@ data_layout::data_layout(id_t id,
   }
 }
 
-size_t data_layout::find_axis(int to_find) const {
+int data_layout::find_axis(int to_find) const {
   auto it = std::find(axes_.begin(), axes_.end(), to_find);
+  if(it == axes_.end())
+    return -1;
   return std::distance(axes_.begin(), it);
 }
 

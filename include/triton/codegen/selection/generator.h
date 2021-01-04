@@ -5,13 +5,13 @@
 
 #include "triton/ir/visitor.h"
 #include "triton/codegen/analysis/layout.h"
-#include "triton/codegen/selection/machine_value.h"
 #include <functional>
 
 // forward
 namespace llvm{
   class Type;
   class Value;
+  class BasicBlock;
   class Instruction;
   class Constant;
   class LLVMContext;
@@ -44,18 +44,13 @@ typedef llvm::IRBuilder<llvm::ConstantFolder,
 typedef llvm::LLVMContext LLVMContext;
 typedef llvm::Type Type;
 typedef llvm::Value Value;
+typedef llvm::BasicBlock BasicBlock;
 typedef llvm::Module Module;
 typedef llvm::Instruction Instruction;
 typedef llvm::Constant Constant;
 typedef llvm::ArrayType ArrayType;
 typedef llvm::Function Function;
 typedef std::vector<Value*> indices_t;
-// forward
-class machine_data_layout;
-class machine_shared_layout;
-class tile;
-class shared_tile;
-class distributed_tile;
 class target;
 
 }
@@ -64,21 +59,26 @@ class target;
 namespace triton{
 namespace codegen{
 
+struct distributed_axis {
+  int contiguous;
+  std::vector<Value*> values;
+  Value* thread_id;
+};
 
 class generator: public ir::visitor, public analysis::layout_visitor {
 private:
-  void for_each(ir::value *x, const std::function<void(indices_t)>& fn);
-  Value* get_value(ir::value *x, const indices_t& idx);
-  void set_value(ir::value *x, const indices_t& idx, Value* v);
+  void init_idx(ir::value *x);
 
-  void visit_hmma_dot(ir::dot_inst*, shared_tile *TA, shared_tile *TB, distributed_tile *TD, unsigned NK);
-  void visit_scanline_dot(ir::dot_inst*, shared_tile *TA, shared_tile *TB, distributed_tile *TD, unsigned NK, Type *c_ty, Function *f_mul_add);
-  void visit_outer_dot(ir::dot_inst*, distributed_tile *TA, distributed_tile *TB, distributed_tile *TD, unsigned NK,
-                       Type *c_ty, Function *f_mul_add);
+  void visit_hmma_dot(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK);
+  void visit_scanline_dot(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK, Type *c_ty, Function *f_mul_add);
+  void visit_outer_dot(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK, Type *c_ty, Function *f_mul_add);
 
   void finalize_shared_layout(analysis::shared_layout*);
   void finalize_function(ir::function*);
   void finalize_phi_node(ir::phi_node*);
+
+private:
+  void for_each(const std::vector<int>& axes, const std::vector<int>& order, const std::function<void(indices_t, size_t)>& fn);
 
 public:
   generator(analysis::axes *a_axes,
@@ -158,25 +158,34 @@ private:
   Builder* builder_;
   Module *mod_;
 
-  std::map<const analysis::data_layout*, machine_data_layout*> machine_layouts_;
   analysis::axes *a_axes_;
   analysis::swizzle *swizzle_;
   std::map<unsigned, distributed_axis> axes_;
-  std::map<ir::value *, Value *> vmap_;
-  std::map<ir::value *, tile *> tmap_;
   target *tgt_;
   analysis::layouts *layouts_;
   analysis::align *alignment_;
   analysis::allocation *alloc_;
-  Value *sh_mem_ptr_;
+  Value *shmem_;
   unsigned num_warps_;
-
-  std::map<machine_shared_layout*, std::map<ir::instruction*, Value*>> read_off;
-  std::map<machine_shared_layout*, std::map<ir::instruction*, Value*>> write_off;
-
   std::set<ir::value*> seen_;
 
-  std::map<analysis::mma_layout*, std::vector<int>> rep_;
+  std::map<analysis::data_layout*, Value*> offset_a_m_;
+  std::map<analysis::data_layout*, Value*> offset_a_k_;
+  std::map<analysis::data_layout*, Value*> offset_b_k_;
+  std::map<analysis::data_layout*, Value*> offset_b_n_;
+
+  std::map<analysis::data_layout*, Value*> shared_ptr_;
+  std::map<analysis::data_layout*, Value*> shared_pre_ptr_;
+  std::map<analysis::data_layout*, Value*> shared_next_ptr_;
+  std::map<analysis::data_layout*, Value*> shared_off_;
+
+
+  std::map<ir::value*, Value*> shmems_;
+  std::map<ir::value*, Value*> shoffs_;
+  std::map<ir::value*, std::vector<indices_t>> idxs_;
+  std::map<ir::value*, std::map<indices_t, Value*>> vals_;
+  std::map<ir::value*, BasicBlock *> bbs_;
+
 };
 
 }
