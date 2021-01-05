@@ -7,7 +7,7 @@ namespace triton{
 namespace ir{
 
 
-enum binary_op_t {
+enum binary_op_t: unsigned int{
   Add,
   FAdd,
   Sub,
@@ -28,7 +28,7 @@ enum binary_op_t {
   Xor
 };
 
-enum cast_op_t {
+enum cast_op_t: unsigned int {
   Trunc,
   ZExt,
   SExt,
@@ -44,7 +44,7 @@ enum cast_op_t {
   AddrSpaceCast
 };
 
-enum cmp_pred_t {
+enum cmp_pred_t: unsigned int {
   FIRST_FCMP_PREDICATE,
   FCMP_FALSE,
   FCMP_OEQ,

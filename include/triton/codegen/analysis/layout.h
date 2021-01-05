@@ -33,7 +33,7 @@ class shared_layout;
 class layout_visitor {
 public:
   virtual void visit_layout(data_layout *);
-  virtual void visit_layout_hmma_884(mma_layout*) = 0;
+  virtual void visit_layout_mma(mma_layout*) = 0;
   virtual void visit_layout_scanline(scanline_layout*) = 0;
   virtual void visit_layout_shared(shared_layout*) = 0;
 };
@@ -41,7 +41,7 @@ public:
 class data_layout {
 protected:
   enum id_t {
-    HMMA_884,
+    MMA,
     SCANLINE,
     SHARED
   };
@@ -68,7 +68,7 @@ public:
   // visitor
   virtual void accept(layout_visitor* vst) = 0;
   // downcast
-  mma_layout* to_mma884()          { return downcast<mma_layout>(HMMA_884); }
+  mma_layout* to_mma()          { return downcast<mma_layout>(MMA); }
   scanline_layout* to_scanline()      { return downcast<scanline_layout>(SCANLINE); }
   shared_layout* to_shared()          { return downcast<shared_layout>(SHARED); }
   // accessors
@@ -102,7 +102,7 @@ public:
                 analysis::align* align, target *tgt,
              shared_layout* layout_a,
              shared_layout* layout_b);
-  void accept(layout_visitor* vst) { vst->visit_layout_hmma_884(this); }
+  void accept(layout_visitor* vst) { vst->visit_layout_mma(this); }
   // accessor
   int fpw(size_t k) { return fpw_.at(k); }
   int wpt(size_t k) { return wpt_.at(k); }

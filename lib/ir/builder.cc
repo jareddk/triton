@@ -1,5 +1,6 @@
 #include <string>
 #include <algorithm>
+#include <iostream>
 #include "triton/ir/basic_block.h"
 #include "triton/ir/builder.h"
 #include "triton/ir/constant.h"
@@ -253,6 +254,15 @@ DEFINE_FCMP_INSTR(ONE, cmp_pred_t::FCMP_ONE)
 
 value *builder::create_load(value *ptr, const std::string &name){
   return insert(unmasked_load_inst::create(ptr, name));
+//  type  *ty  = ptr->get_type()->get_pointer_element_ty();
+//  value *mask   = constant_int::get(get_int1_ty(), 1);
+//  value *undef  = undef_value::get(ty);
+//  if(ptr->get_type()->is_tile_ty()){
+//    auto shapes = ptr->get_type()->get_tile_shapes();
+//    return insert(masked_load_inst::create(ptr, create_splat(mask, shapes), create_splat(undef, shapes), name));
+//  }
+//  return insert(masked_load_inst::create(ptr, mask, undef, name));
+
 }
 
 value *builder::create_store(value *ptr, value *val, const std::string &name){

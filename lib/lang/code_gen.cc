@@ -277,9 +277,7 @@ void Generator::VisitConditionalOp(ConditionalOp* condOp) {
   if(ir::unmasked_load_inst* ld = dynamic_cast<ir::unmasked_load_inst*>(true_val)) {
     if(true_val->get_type()->is_tile_ty() && !false_val->get_type()->is_tile_ty())
       false_val = bld_->create_splat(false_val, cond->get_type()->get_tile_shapes());
-    ir::value* new_ld = bld_->create_masked_load(ld->get_pointer_operand(),
-                                                  cond,
-                                                  false_val);
+    ir::value* new_ld = bld_->create_masked_load(ld->get_pointer_operand(),  cond, false_val);
     ld->replace_all_uses_with(new_ld);
     ld->erase_from_parent();
     return set_ret(new_ld);

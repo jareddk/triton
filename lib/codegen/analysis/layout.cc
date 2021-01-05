@@ -132,7 +132,7 @@ mma_layout::mma_layout(size_t num_warps,
                        const std::vector<unsigned>& shape,
                        const std::vector<ir::value *> &values,
                        analysis::align* align, target* tgt,
-                       shared_layout *layout_a, shared_layout *layout_b): data_layout(HMMA_884, axes, shape, values, align) {
+                       shared_layout *layout_a, shared_layout *layout_b): data_layout(MMA, axes, shape, values, align) {
   /* fragments per warp */
   // try to make things as square as possible to maximize data re-use
   if(tgt->as_nvidia()->sm() < 80){
@@ -431,7 +431,7 @@ void layouts::run(ir::module &mod) {
     }
     if(auto *recoalasce = dynamic_cast<ir::recoalesce_inst*>(i)){
       ir::value *val = recoalasce->get_operand(0);
-      mma_layout* in_layout = get(val)->to_mma884();
+      mma_layout* in_layout = get(val)->to_mma();
       scanline_layout* out_layout = get(i)->to_scanline();
       if(!in_layout || !out_layout)
         return;
@@ -442,7 +442,7 @@ void layouts::run(ir::module &mod) {
       shape[ld] = in_shape[ld];
       for(size_t k = 0; k < in_shape.size(); k++)
         if(k != ld)
-          shape[k] = in_layout->to_mma884()->spt(k);
+          shape[k] = in_layout->to_mma()->spt(k);
       // create layout
       layouts_[id] = new shared_layout(out_layout, axes_->get(val), shape, {recoalasce}, val->get_type()->get_scalar_ty(), align_);
       tmp_[recoalasce] = id;
