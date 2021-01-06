@@ -244,12 +244,12 @@ std::unique_ptr<driver::module> function::make_bin(ir::module &module, driver::d
   align.run(module);
   axes.run(module);
   layouts.run(module);
+  swizzle.run(module);
   liveness.run(module);
   allocation.run(module);
   if(allocation.allocated_size() > device->max_shared_memory())
     throw exception::out_of_shared_memory();
   barriers.run(module);
-  swizzle.run(module);
   isel.visit(module, *llvm);
   std::unique_ptr<driver::module> res(driver::module::create(device, std::move(llvm)));
   if(res->spilled() > 256)

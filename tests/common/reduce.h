@@ -161,7 +161,7 @@ void triton_reduce_nd(drv::context* context, drv::stream* stream, const std::vec
     std::vector<NumericT> ry(size_y);
     std::vector<NumericT> hx(size_x);
     init_zeros(hy);
-    init_ones(hx);
+    init_rand(hx);
     stream->write(&*dx, true, 0, hx);
     function((void**)oss.str().data(), oss.str().size(), grid, stream, device);
     stream->synchronize();

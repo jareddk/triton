@@ -159,8 +159,10 @@ public:
   ir::type* get_type()                      { return ty_; }
   double_buffer_info_t* get_double_buffer() { return double_buffer_.get(); }
   size_t get_num_per_phase()                { return num_per_phase_; }
-  bool is_hmma_dot_a()                      { return is_hmma_dot_a_; }
-  bool is_hmma_dot_b()                      { return is_hmma_dot_b_; }
+  ir::value* hmma_dot_a()                      { return hmma_dot_a_; }
+  ir::value* hmma_dot_b()                      { return hmma_dot_b_; }
+  void set_mma_vec(int mma_vec)             { mma_vec_ = mma_vec; }
+  int  get_mma_vec()                        { return mma_vec_;}
   data_layout* get_arg_layout()             { return arg_layout_; }
 
 private:
@@ -168,9 +170,10 @@ private:
   ir::type *ty_;
   std::shared_ptr<double_buffer_info_t> double_buffer_;
   size_t num_per_phase_;
-  bool is_hmma_dot_a_;
-  bool is_hmma_dot_b_;
+  ir::value* hmma_dot_a_;
+  ir::value* hmma_dot_b_;
   data_layout* arg_layout_;
+  int mma_vec_;
 };
 
 

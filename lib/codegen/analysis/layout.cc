@@ -55,7 +55,7 @@ inline void extract_hmma_dot_use(ir::value *v, ir::value*& result, size_t n) {
   for(ir::user* u: v->get_users()){
     auto i = dynamic_cast<ir::dot_inst*>(u);
     if(i && is_hmma_c(i) && i->get_operand(n) == v)
-      result = v;
+      result = i;
   }
 }
 
@@ -150,8 +150,10 @@ mma_layout::mma_layout(size_t num_warps,
     auto ord_b = layout_b->get_order();
     bool is_a_row = ord_a[0] != 0;
     bool is_b_row = ord_b[0] != 0;
-    int pack_size_0 = is_a_row ? 1 : 2;
-    int pack_size_1 = is_b_row ? 2 : 1;
+    bool is_a_vec4 = !is_a_row && (layout_a->get_shape()[ord_a[0]] <= 16);
+    bool is_b_vec4 =  is_b_row && (layout_b->get_shape()[ord_b[0]] <= 16);
+    int pack_size_0 = (is_a_row ||  is_a_vec4) ? 1 : 2;
+    int pack_size_1 = (is_b_row && !is_b_vec4) ? 2 : 1;
     rep_ = {2*pack_size_0, 2*pack_size_1, 1};
     spw_ = {fpw_[0]*8*pack_size_0, fpw_[1]*8*pack_size_1, 1};
   }
@@ -297,10 +299,8 @@ shared_layout::shared_layout(data_layout *arg,
     extract_hmma_dot_use(v, hmma_dot_a, 0);
     extract_hmma_dot_use(v, hmma_dot_b, 1);
   }
-  is_hmma_dot_a_ = hmma_dot_a != nullptr;
-  is_hmma_dot_b_ = hmma_dot_b != nullptr;
-//  std::cout << is_hmma_dot_a_ << "" << is_hmma_dot_b_ << std::endl;
-
+  hmma_dot_a_ = hmma_dot_a;
+  hmma_dot_b_ = hmma_dot_b;
 
   // non-mma ordering
   std::vector<int> col = {0, 1};

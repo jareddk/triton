@@ -12,6 +12,7 @@
 #include "triton/ir/type.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/InlineAsm.h"
@@ -566,7 +567,7 @@ void generator::visit_atomic_cas_inst(ir::atomic_cas_inst* cas) {
   Value *pred = icmp_eq(tid, i32(0));
   BasicBlock *tid_0_bb = BasicBlock::Create(*ctx_, "tid_0", current->getParent());
   BasicBlock *tid_0_done_bb = BasicBlock::Create(*ctx_, "tid_0_done", current->getParent());
-  tgt_->add_barrier(module, *builder_);
+  add_barrier();
   tgt_->add_memfence(module, *builder_);
   cond_br(pred, tid_0_bb, tid_0_done_bb);
   builder_->SetInsertPoint(tid_0_bb);
@@ -582,7 +583,7 @@ void generator::visit_atomic_cas_inst(ir::atomic_cas_inst* cas) {
   br(tid_0_done_bb);
   builder_->SetInsertPoint(tid_0_done_bb);
   tgt_->add_memfence(module, *builder_);
-  tgt_->add_barrier(module, *builder_);
+  add_barrier();
   vals_[cas][{}] = load(atom_ptr);
 }
 
@@ -599,7 +600,7 @@ void generator::visit_atomic_exch_inst(ir::atomic_exch_inst* xchg) {
   BasicBlock *tid_0_bb = BasicBlock::Create(*ctx_, "tid_0", current->getParent());
   BasicBlock *tid_0_done_bb = BasicBlock::Create(*ctx_, "tid_0_done", current->getParent());
   tgt_->add_memfence(module, *builder_);
-  tgt_->add_barrier(module, *builder_);
+  add_barrier();
   cond_br(pred, tid_0_bb, tid_0_done_bb);
   builder_->SetInsertPoint(tid_0_bb);
   atomic_rmw(AtomicRMWInst::Xchg, rmw_ptr, rmw_val, AtomicOrdering::Monotonic, SyncScope::System);
@@ -683,7 +684,7 @@ void generator::visit_atomic_add_inst(ir::atomic_add_inst* add) {
     BasicBlock *tid_0_bb = BasicBlock::Create(*ctx_, "tid_0", current->getParent());
     BasicBlock *tid_0_done_bb = BasicBlock::Create(*ctx_, "tid_0_done", current->getParent());
     tgt_->add_memfence(module, *builder_);
-    tgt_->add_barrier(module, *builder_);
+    add_barrier();
     cond_br(pred, tid_0_bb, tid_0_done_bb);
     builder_->SetInsertPoint(tid_0_bb);
     call(iasm, (ArrayRef<Value*>{rmw_msk, rmw_ptr, rmw_val}));
@@ -845,14 +846,10 @@ void generator::visit_mma884(ir::dot_inst* C, ir::value *A, ir::value *B, ir::va
     auto hb = hbs[{n, K}];
     // arguments
     std::vector<size_t> idx = {
-      (m*2 + 0) + (n*4 + 0)*num_m,
-      (m*2 + 0) + (n*4 + 1)*num_m,
-      (m*2 + 1) + (n*4 + 0)*num_m,
-      (m*2 + 1) + (n*4 + 1)*num_m,
-      (m*2 + 0) + (n*4 + 2)*num_m,
-      (m*2 + 0) + (n*4 + 3)*num_m,
-      (m*2 + 1) + (n*4 + 2)*num_m,
-      (m*2 + 1) + (n*4 + 3)*num_m
+      (m*2 + 0) + (n*4 + 0)*num_m, (m*2 + 0) + (n*4 + 1)*num_m,
+      (m*2 + 1) + (n*4 + 0)*num_m, (m*2 + 1) + (n*4 + 1)*num_m,
+      (m*2 + 0) + (n*4 + 2)*num_m, (m*2 + 0) + (n*4 + 3)*num_m,
+      (m*2 + 1) + (n*4 + 2)*num_m, (m*2 + 1) + (n*4 + 3)*num_m
     };
     std::vector<Value*> args = {ha.first, ha.second, hb.first, hb.second};
     for(unsigned i = 0; i < 8; i++)
@@ -1056,7 +1053,10 @@ void generator::visit_fmadot(ir::dot_inst* dot, ir::value* A, ir::value* B, ir::
   throw std::runtime_error("TODO: v1.0 not complete");
 }
 
-
+/**
+ * \brief Code Generation for `dot`
+ * Dispatches to appropriate specialized function
+ */
 void generator::visit_dot_inst(ir::dot_inst* dot) {
   Function *fn = builder_->GetInsertBlock()->getParent();
   Module *module = fn->getParent();
@@ -1081,205 +1081,187 @@ void generator::visit_trans_inst(ir::trans_inst* trans) {
   throw std::runtime_error("not supported");
 }
 
+/**
+ * \brief Code Generation for `sqrt`
+ */
 void generator::visit_sqrt_inst(ir::sqrt_inst* x) {
   for(indices_t idx: idxs_.at(x)){
     Value *val = vals_[x->get_operand(0)][idx];
-    Value *ret = intrinsic(Intrinsic::sqrt,
-                                           std::vector<llvm::Type*>{val->getType()},
-                                           std::vector<llvm::Value*>{val});
+    Value *ret = intrinsic(Intrinsic::sqrt, {val->getType()}, {val});
     vals_[x][idx] = ret;
   }
 }
 
-inline Value* shared_offset(llvm::IRBuilder<> &builder, const std::vector<unsigned>& shapes, const std::vector<int>& order, indices_t idx){
+Value* generator::shared_off(const std::vector<unsigned>& shapes, const std::vector<int>& order, indices_t idx){
   // strides
-  std::vector<Value*> strides(shapes.size(), builder.getInt32(0));
-  strides[order[0]] = builder.getInt32(1);
+  std::vector<Value*> strides(shapes.size(), builder_->getInt32(0));
+  strides[order[0]] = builder_->getInt32(1);
   for(size_t i = 1; i < idx.size(); i++)
-    strides[order[i]] = builder.CreateMul(strides[order[i-1]], builder.getInt32(shapes[order[i-1]]));
+    strides[order[i]] = builder_->CreateMul(strides[order[i-1]], builder_->getInt32(shapes[order[i-1]]));
   // result
-  Value *result = builder.getInt32(0);
+  Value *result = builder_->getInt32(0);
   for(size_t i = 0; i < idx.size(); i++)
-    result = builder.CreateAdd(result, builder.CreateMul(idx[i], strides[i]));
+    result = builder_->CreateAdd(result, builder_->CreateMul(idx[i], strides[i]));
   return result;
 }
 
-void generator::visit_reduce_inst(ir::reduce_inst* x) {
+/**
+ * \brief Code Generation for `reduce` (1D case)
+ */
+void generator::visit_reduce1d_inst(ir::reduce_inst* x, std::function<Value*(Value*,Value*)> do_acc, Value *neutral) {
   std::map<indices_t, Value*> partial;
   ir::value *arg = x->get_operand(0);
   Type *ty = cvt(x->get_type()->get_scalar_ty());
-  ir::reduce_inst::op_t op = x->get_op();
-  unsigned axis = x->get_axis();
-
-  FunctionType *fmaxmin_ty = FunctionType::get(f32_ty, {f32_ty, f32_ty}, false);
-  InlineAsm *fmin = InlineAsm::get(fmaxmin_ty, "min.ftz.f32 $0, $1, $2;", "=f,f,f", false);
-  InlineAsm *fmax = InlineAsm::get(fmaxmin_ty, "max.ftz.f32 $0, $1, $2;", "=f,f,f", false);
-
-  auto accumulate = [&](Value* x, Value *y) -> Value* {
-    switch(op) {
-      case ir::reduce_inst::ADD: return add(x, y);
-      case ir::reduce_inst::SUB: return sub(x, y);
-      case ir::reduce_inst::MAX:{
-        if(x->getType()->isIntegerTy())
-          return select(icmp_sge(x, y), x, y);
-        else
-          return max_num(x, y);
-      }
-      case ir::reduce_inst::MIN:{
-        if(x->getType()->isIntegerTy())
-          return select(icmp_sle(x, y), x, y);
-        else
-          return min_num(x, y);
-      }
-      case ir::reduce_inst::FADD: return fadd(x, y);
-      case ir::reduce_inst::FSUB: return fsub(x, y);
-      case ir::reduce_inst::FMAX: return call(fmax, std::vector<llvm::Value*>{x, y});
-      case ir::reduce_inst::FMIN: return call(fmin, std::vector<llvm::Value*>{x, y});
-      default: assert(false); return nullptr;
-    }
-  };
-
-  Value *neutral;
-  switch(op) {
-    case ir::reduce_inst::ADD: neutral = i32(0); break;
-    case ir::reduce_inst::SUB: neutral = i32(0); break;
-    case ir::reduce_inst::MAX: neutral = i32(INT32_MIN); break;
-    case ir::reduce_inst::MIN: neutral = i32(INT32_MAX); break;
-    case ir::reduce_inst::FADD: neutral = ConstantFP::get(ty, 0); break;
-    case ir::reduce_inst::FSUB: neutral = ConstantFP::get(ty, 0); break;
-    case ir::reduce_inst::FMAX: neutral = ConstantFP::get(ty, -INFINITY); break;
-    case ir::reduce_inst::FMIN: neutral = ConstantFP::get(ty, INFINITY); break;
-    default: assert(false); break;
-  }
-
-
-  analysis::data_layout* arg_layout = layouts_->get(arg);
-  if(auto* L = dynamic_cast<analysis::scanline_layout*>(arg_layout)){
-    bool can_optimize = L->get_rank() == 1;
-
-    if(can_optimize){
-      Value *thread_acc = nullptr;
-      // reduce within thread
-      for(indices_t idx: idxs_.at(arg)){
-        Value *current = vals_[arg][idx];
-        if(thread_acc == nullptr)
-          thread_acc = current;
-        else
-          thread_acc = accumulate(thread_acc, current);
-      }
-      // reduce within wrap
-      FunctionType *fn_ty = FunctionType::get(thread_acc->getType(), std::vector<llvm::Type*>{thread_acc->getType(), i32_ty}, false);
-      InlineAsm *shfl_xor = InlineAsm::get(fn_ty, "shfl.sync.bfly.b32 $0, $1, $2, 0x1f, 0xffffffff;", "=f,f,r", false);
-      Value *warp_acc = thread_acc;
-      for(int i = 16; i > 0; i >>= 1)
-        warp_acc = accumulate(warp_acc, call(shfl_xor, std::vector<llvm::Value*>{warp_acc, i32(i)}));
-      // shared memory pointer
-      unsigned addr_space = shmem_->getType()->getPointerAddressSpace();
-      Type *res_ty = ty;
-      Value *sh_mem_ptr = bit_cast(shmem_, ptr_ty(res_ty, addr_space));
-      Value* thread_id = tgt_->get_local_id(mod_, *builder_, 0);
-      Value* warp_id = udiv(thread_id, i32(32));
-      Value* lane_id = urem(thread_id, i32(32));
-      Value *write_ptr = gep(sh_mem_ptr, warp_id);
-      // store warp result in shared memory
-      tgt_->add_barrier(mod_, *builder_);
-      store(neutral, gep(sh_mem_ptr, lane_id));
-      tgt_->add_barrier(mod_, *builder_);
-      store(warp_acc, write_ptr);
-      tgt_->add_barrier(mod_, *builder_);
-      // accumulate all warps
-      Value *load_ptr = gep(sh_mem_ptr, thread_id);
-      Value* is_first_warp = icmp_eq(warp_id, i32(0));
-      BasicBlock* bb_final_acc = BasicBlock::Create(*ctx_, "bb_final_acc", builder_->GetInsertBlock()->getParent());
-      BasicBlock* bb_final_acc_done = BasicBlock::Create(*ctx_, "bb_final_acc_done", builder_->GetInsertBlock()->getParent());
-      cond_br(is_first_warp, bb_final_acc, bb_final_acc_done);
-      builder_->SetInsertPoint(bb_final_acc);
-      Value* ret = load(load_ptr);
-      for(int i = (num_warps_+1)/2; i > 0; i >>= 1){
-        Value *current = call(shfl_xor, std::vector<llvm::Value*>{ret, i32(i)});
-        ret = accumulate(ret, current);
-      }
-      store(ret, load_ptr);
-      br(bb_final_acc_done);
-      // store first warp done
-      builder_->SetInsertPoint(bb_final_acc_done);
-      // write back
-      tgt_->add_barrier(mod_, *builder_);
-      ret = load(sh_mem_ptr);
-      for(indices_t idx: idxs_.at(x))
-        vals_[x][idx] = ret;
-      return;
-    }
-  }
+  Value *acc = nullptr;
 
   // reduce within thread
+  for(indices_t idx: idxs_.at(arg)){
+    Value *val = vals_[arg][idx];
+    acc = !acc ? val : do_acc(acc, val);
+  }
+  // reduce within wrap
+  InlineAsm *shfl = InlineAsm::get(FunctionType::get(ty, {ty, i32_ty}, false),
+                                   "shfl.sync.bfly.b32 $0, $1, $2, 0x1f, 0xffffffff;", "=f,f,r", false);
+  for(int i = 16; i > 0; i >>= 1)
+    acc = do_acc(acc, call(shfl, {acc, i32(i)}));
+  // pointers
+  unsigned addr_space = shmem_->getType()->getPointerAddressSpace();
+  Value *base = bit_cast(shmem_, ptr_ty(ty, addr_space));
+  Value* thread = tgt_->get_local_id(mod_, *builder_, 0);
+  Value* warp = udiv(thread, i32(32));
+  Value* lane = urem(thread, i32(32));
+  // store warp result in shared memory
+  add_barrier();
+  store(neutral, gep(base, lane));
+  add_barrier();
+  store(acc, gep(base, warp));
+  add_barrier();
+
+  // reduce across warps
+  Value *cond = icmp_eq(warp, i32(0));
+  Instruction *barrier = add_barrier();
+  Instruction *term = llvm::SplitBlockAndInsertIfThen(cond, barrier, false);
+  builder_->SetInsertPoint(term);
+  Value* ret = load(gep(base, thread));
+  for(int i = (num_warps_+1)/2; i > 0; i >>= 1){
+    Value *current = call(shfl, {ret, i32(i)});
+    ret = do_acc(ret, current);
+  }
+  store(ret, gep(base, thread));
+
+  // store first warp done
+  builder_->SetInsertPoint(barrier->getParent());
+  ret = load(base);
+  for(indices_t idx: idxs_.at(x))
+    vals_[x][idx] = ret;
+}
+
+/**
+ * \brief Code Generation for `reduce` (ND case)
+ */
+void generator::visit_reducend_inst(ir::reduce_inst* x, std::function<Value*(Value*,Value*)> do_acc, Value *neutral) {
+  ir::value *arg = x->get_operand(0);
+  Type *ty = cvt(x->get_type()->get_scalar_ty());
+  unsigned axis = x->get_axis();
+
+  // reduce within thread
+  std::map<indices_t, Value*> accs;
   for(indices_t idx: idxs_.at(arg)){
     indices_t pidx = idx;
     pidx[axis] = i32(0);
     Value *current = vals_[arg][idx];
-    // current partial result is not initialized -- create
-    if(partial.find(pidx) == partial.end())
-      partial[pidx] = current;
-    // current partial result is initialized -- accumulate
-    else
-      partial[pidx] = accumulate(partial[pidx], current);
+    bool is_first = accs.find(pidx) == accs.end();
+    accs[pidx] = is_first ? current : do_acc(accs[pidx], current);
   };
 
   // reduce within blocks
   analysis::data_layout* layout = layouts_->get(layouts_->tmp(x));
-  auto shapes = layout->get_shape();
-  auto ord = layout->get_order();
-  unsigned depth = shapes[axis];
-
-  unsigned addr_space = shmem_->getType()->getPointerAddressSpace();
-  Type *res_ty = ty;
-  Value *base_ptr = bit_cast(shmem_, ptr_ty(res_ty, addr_space));
-
-  for(auto& x: partial) {
+  Value *base = shared_ptr_.at(layout);
+  auto shape  = layout->get_shape();
+  auto order  = layout->get_order();
+  int  space = base->getType()->getPointerAddressSpace();
+  Value *ptr = bit_cast(base, ptr_ty(ty, space));
+  Value *lane = axes_.at(a_axes_->get(arg, axis)).thread_id;
+  for(auto& x: accs) {
     // current element being computed
-    Value *lane = axes_.at(a_axes_->get(arg, axis)).thread_id;
-    Value *&result = x.second;
+    Value *&acc = x.second;
     indices_t write_idx = x.first;
     write_idx[axis] = lane;
     // shared memory write  pointer
-    Value *write_offset = shared_offset(*builder_, shapes, ord, write_idx);
-    Value *write_ptr = gep(base_ptr, write_offset);
+    Value *write_off = shared_off(shape, order, write_idx);
+    Value *write_ptr = gep(ptr, write_off);
     // initialize shared memory
-    tgt_->add_barrier(mod_, *builder_);
-    store(result, write_ptr);
+    add_barrier();
+    store(acc, write_ptr);
     // build result
-    for(unsigned i = depth/2; i > 0; i >>= 1){
-      // current indices
-      indices_t current(write_idx.size(), i32(0));
-      current[axis] = i32(i);
-      // shared memory offset
-      Value *read_offset = shared_offset(*builder_, shapes, ord, current);
-      Value *is_active = icmp_ult(lane, i32(i));
-      read_offset = select(is_active, read_offset, i32(0));
-      // shared memory read pointer
-      Value *read_ptr = gep(write_ptr, read_offset);
-      tgt_->add_barrier(mod_, *builder_);
-      Value *next = load(read_ptr);
-      // accumulate
-      result = accumulate(result, next);
-      // write back
-      tgt_->add_barrier(mod_, *builder_);
-      store(result, write_ptr);
+    indices_t idx(write_idx.size(), i32(0));
+    for(size_t i = shape[axis]/2; i > 0; i >>= 1){
+      idx[axis] = i32(i);
+      // read pointer
+      Value *read_msk = icmp_ult(lane, i32(i));
+      Value *read_off = select(read_msk, shared_off(shape, order, idx), i32(0));
+      Value *read_ptr = gep(write_ptr, read_off);
+      add_barrier();
+      // update accumulator
+      acc = do_acc(acc, load(read_ptr));
+      store(acc, write_ptr);
     }
   }
-  tgt_->add_barrier(mod_, *builder_);
+  add_barrier();
 
   // write back
   for(indices_t idx: idxs_.at(x)){
-    indices_t red_idx = idx;
-    red_idx.insert(red_idx.begin() + axis, i32(0));
-    Value *read_offset = shared_offset(*builder_, shapes, ord, red_idx);
-    Value *read_ptr = gep(base_ptr, read_offset);
+    indices_t read_idx = idx;
+    read_idx.insert(read_idx.begin() + axis, i32(0));
+    Value *read_off = shared_off(shape, order, read_idx);
+    Value *read_ptr = gep(ptr, read_off);
     vals_[x][idx] = load(read_ptr);
-
   };
 }
 
+/**
+ * \brief Code Generation for `reduce` (generic case)
+ */
+void generator::visit_reduce_inst(ir::reduce_inst* x) {
+  Type *ty = cvt(x->get_type()->get_scalar_ty());
+  // accumulation function
+  ir::reduce_inst::op_t op = x->get_op();
+  auto do_acc = [&](Value *x, Value *y) -> Value* {
+    switch(op){
+    case ir::reduce_inst::ADD: return add(x, y);
+    case ir::reduce_inst::SUB: return sub(x, y);
+    case ir::reduce_inst::MAX: return select(icmp_sge(x, y), x, y);
+    case ir::reduce_inst::MIN: return select(icmp_sle(x, y), x, y);
+    case ir::reduce_inst::FADD: return fadd(x, y);
+    case ir::reduce_inst::FSUB: return fsub(x, y);
+    case ir::reduce_inst::FMAX: return max_num(x, y);
+    case ir::reduce_inst::FMIN: return min_num(x, y);
+    default: throw std::runtime_error("unreachable");
+    }
+  };
+  // neutral element
+  Value *neutral;
+  switch(op) {
+    case ir::reduce_inst::ADD: neutral = i32(0); break;
+    case ir::reduce_inst::SUB:  neutral = i32(0); break;
+    case ir::reduce_inst::MAX:  neutral = i32(INT32_MIN); break;
+    case ir::reduce_inst::MIN:  neutral = i32(INT32_MAX); break;
+    case ir::reduce_inst::FADD: neutral = ConstantFP::get(ty, 0); break;
+    case ir::reduce_inst::FSUB: neutral = ConstantFP::get(ty, 0); break;
+    case ir::reduce_inst::FMAX: neutral = ConstantFP::get(ty, -INFINITY); break;
+    case ir::reduce_inst::FMIN: neutral = ConstantFP::get(ty, INFINITY); break;
+    default: throw std::runtime_error("unreachable");
+  }
+  ir::value *arg = x->get_operand(0);
+  if(arg->get_type()->get_tile_rank() == 1)
+    visit_reduce1d_inst(x, do_acc, neutral);
+  else
+    visit_reducend_inst(x, do_acc, neutral);
+}
+
+/**
+ * \brief Code Generation for `select`
+ */
 void generator::visit_select_inst(ir::select_inst* x) {
   for(indices_t idx: idxs_.at(x))
     vals_[x][idx] = select(vals_[x->get_operand(0)][idx],
@@ -1287,6 +1269,9 @@ void generator::visit_select_inst(ir::select_inst* x) {
                            vals_[x->get_operand(2)][idx]);
 }
 
+/**
+ * \brief Code Generation for `recoalesce`
+ */
 void generator::visit_recoalesce_inst(ir::recoalesce_inst* rc) {
   ir::value *op = rc->get_operand(0);
   ir::tile_type::tile_shapes_t shape = rc->get_type()->get_tile_shapes();
@@ -1305,15 +1290,15 @@ void generator::visit_recoalesce_inst(ir::recoalesce_inst* rc) {
   auto in_ord1 = axes_.at(a_axes_->get(op, ord[1])).values;
   auto out_ord0 = axes_.at(a_axes_->get(rc, ord[0])).values;
   auto out_ord1 = axes_.at(a_axes_->get(rc, ord[1])).values;
-  indices_t idx(2);
   int in_outer = in_layout->spt(ord[1]);
   int in_rep   = in_layout->rep(ord[1]);
   int out_outer = out_layout->mts(ord[1]) * out_layout->nts(ord[1]);
-  size_t max_outer = std::max(in_outer, out_outer);
-  size_t out_ratio = std::max<size_t>(out_outer/in_outer, 1);
-  size_t in_ratio = std::max<size_t>(in_outer/out_outer, 1);
+  int max_outer = std::max(in_outer, out_outer);
+  int out_ratio = std::max(out_outer/in_outer, 1);
+  int in_ratio = std::max(in_outer/out_outer, 1);
+  indices_t idx(2);
   for(size_t j = 0; j < shape[ord[1]]/max_outer; j++){
-    tgt_->add_barrier(mod_, *builder_);
+    add_barrier();
     for(size_t k = 0; k < in_rep*out_ratio; k++)
     for(size_t i = 0; i < in_ord0.size(); i++){
       idx[ord[0]] = in_ord0[i];
@@ -1322,7 +1307,7 @@ void generator::visit_recoalesce_inst(ir::recoalesce_inst* rc) {
       Value *ptr = gep(base, off);
       store(vals_[op][idx], ptr);
     }
-    tgt_->add_barrier(mod_, *builder_);
+    add_barrier();
     for(size_t k = 0; k < in_ratio; k++)
     for(size_t i = 0; i < out_ord0.size(); i++){
       idx[ord[0]] = out_ord0[i];
@@ -1441,10 +1426,7 @@ void generator::visit_copy_to_shared_inst(ir::copy_to_shared_inst* cts) {
         Value* off_1 = mul(idx[in_order[1]], i32(shapes[in_order[0]]));
         Value* off_0  = add(idx[in_order[0]], i32(key.second*out_vec));
         off_0 = udiv(off_0, i32(min_vec));
-        off_0 = add(mul(xor_(udiv(off_0, i32(s)),
-                                                                            phase),
-                                                        i32(s)),
-                                    urem(off_0, i32(s)));
+        off_0 = add(mul(xor_(udiv(off_0, i32(s)), phase),i32(s)), urem(off_0, i32(s)));
         off_0 = mul(off_0 , i32(min_vec));
         Value* off = add(off_0, off_1);
         builder_->SetInsertPoint(CurrBB);
@@ -1458,24 +1440,24 @@ void generator::visit_copy_to_shared_inst(ir::copy_to_shared_inst* cts) {
   };
 }
 
-void generator::visit_copy_from_shared_inst(ir::copy_from_shared_inst* x) {
-//  throw std::runtime_error("TODO");
-//  for_each(x, [&](indices_t idx, int){
-//    set_value(x, idx, get_value(x->get_operand(0), idx));
-//  });
+void generator::visit_copy_from_shared_inst(ir::copy_from_shared_inst*) {
+  throw std::runtime_error("TODO");
+}
+
+Instruction* generator::add_barrier() {
+  Module *module = builder_->GetInsertBlock()->getModule();
+  return tgt_->add_barrier(module, *builder_);
 }
 
 void generator::visit_barrier_inst(ir::barrier_inst*) {
-  Module *module = builder_->GetInsertBlock()->getModule();
-  tgt_->add_barrier(module, *builder_);
+  add_barrier();
 }
 
 void generator::visit_async_wait_inst(ir::async_wait_inst*) {
-  Module *module = builder_->GetInsertBlock()->getModule();
   std::string asm_str = "cp.async.wait_all;";
   InlineAsm *iasm = InlineAsm::get(FunctionType::get(void_ty, {}), asm_str, "", true);
   call(iasm);
-  tgt_->add_barrier(module, *builder_);
+  add_barrier();
 }
 
 void generator::visit_make_range_dyn(ir::make_range_dyn* x) {

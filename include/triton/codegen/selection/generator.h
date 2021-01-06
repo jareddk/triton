@@ -77,11 +77,8 @@ struct distributed_axis {
 class generator: public ir::visitor, public analysis::layout_visitor {
 private:
   void init_idx(ir::value *x);
-
-  void visit_mma884(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK);
-  void visit_mma16816(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK);
-  void visit_fmadot(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK, Type *c_ty, Function *f_mul_add);
-
+  Instruction* add_barrier();
+  Value* shared_off(const std::vector<unsigned>& shapes, const std::vector<int>& order, indices_t idx);
   void finalize_shared_layout(analysis::shared_layout*);
   void finalize_function(ir::function*);
   void finalize_phi_node(ir::phi_node*);
@@ -126,9 +123,14 @@ public:
   void visit_atomic_cas_inst(ir::atomic_cas_inst*);
   void visit_atomic_exch_inst(ir::atomic_exch_inst*);
   void visit_atomic_add_inst(ir::atomic_add_inst*);
+  void visit_mma884(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK);
+  void visit_mma16816(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK);
+  void visit_fmadot(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK, Type *c_ty, Function *f_mul_add);
   void visit_dot_inst(ir::dot_inst*);
   void visit_trans_inst(ir::trans_inst*);
   void visit_sqrt_inst(ir::sqrt_inst*);
+  void visit_reduce1d_inst(ir::reduce_inst*, std::function<Value*(Value*,Value*)>, Value*);
+  void visit_reducend_inst(ir::reduce_inst*, std::function<Value*(Value*,Value*)>, Value*);
   void visit_reduce_inst(ir::reduce_inst*);
   void visit_select_inst(ir::select_inst*);
   void visit_recoalesce_inst(ir::recoalesce_inst*);

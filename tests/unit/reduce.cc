@@ -21,6 +21,7 @@ int main() {
   typedef std::tuple<std::vector<int>, int, reduce_op_t> config_t;
   std::vector<config_t> configs = {
     config_t{{64}, 0, ADD},
+    config_t{{128}, 0, MIN},
     config_t{{32, 32}, 0, MAX},
     config_t{{32, 32}, 1, ADD},
     config_t{{32, 64}, 0, ADD},
@@ -28,8 +29,6 @@ int main() {
     config_t{{8, 8, 4}, 2, ADD},
     config_t{{8, 8, 4}, 0, ADD},
     config_t{{8, 8, 4}, 1, ADD}
-
-
   };
   // does the work
   int axis;
