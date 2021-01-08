@@ -944,21 +944,6 @@ void generator::visit_mma16816(ir::dot_inst* dot, ir::value *A, ir::value *B, ir
   Value *warp1  = urem(warp12, i32(layout->wpt(1)));
   std::vector<Value *>& fc = fcs.begin()->second;
 
-
-
-
-//  Value *off_a0  = add(urem(udiv(lane, i32(8)), i32(2)), mul(warp0, i32(2)));
-//  Value *off_a1  = udiv(lane, i32(16));
-//  Value* off_a   = mul(tidr8, i32(lda));
-//  int num_ptr_row_a = !is_a_row ? std::min<int>(shapes[0] / layout->spt(0), max_phase_a): 1;
-//  int num_ptr_col_a = 2;
-//  std::map<std::pair<int,int>, Value*> offs_a;
-//  for(int r = 0; r < num_ptr_row_a; r++){
-//    Value *off_am = add(off_a0, i32(2*layout->wpt(0)*r));
-//    off_am = is_a_row ? off_am : xor_(off_am, phase_a);
-//    for(int c = 0; c < num_ptr_col_a; c++){
-//      Value *off_ak = add(off_a1, i32(2*c));
-//      off_ak = is_a_row ? xor_(off_ak, phase_a) : off_ak;
   Value *tidr8  = urem(lane, i32(8));
   Value *phase_a = urem(udiv(tidr8, i32(per_phase_a)), i32(max_phase_a));
   Value* off_a0   = mul(tidr8, i32(lda));
@@ -975,31 +960,9 @@ void generator::visit_mma16816(ir::dot_inst* dot, ir::value *A, ir::value *B, ir
     off_a[i] = add(mul(off_a0i, i32(stride_a0)), mul(off_a1, i32(stride_a1)));
   }
 
-
-//  int num_ptr_row_b = 2;
-//  int num_ptr_col_b = is_b_row ? std::min<int>(shapes[1] / layout->spt(1), max_phase_b) : 1;
-//  Value *b_base = urem(lane, i32(8));
-//  Value *b_phase = urem(udiv(b_base, i32(per_phase_b)), i32(max_phase_b));
-//  Value *b_row0 = urem(udiv(lane, i32(8)), i32(2));
-//  Value *b_col0 = add(mul(udiv(lane, i32(16)), i32(layout->wpt(1))),
-//                                      mul(warp1, i32(1)));
-//  Value *off_b = mul(b_base, i32(ldb));
-//  std::map<std::pair<int,int>, Value*> b_offs;
-//  for(size_t r = 0; r < num_ptr_row_b; r++){
-//    Value *off_b_k = add(b_row0, i32(r*2));
-//    off_b_k = is_b_row ? off_b_k : xor_(off_b_k, b_phase);
-//    for(size_t c = 0; c < num_ptr_col_b; c++){
-//      Value *off_b_n = add(b_col0, i32(c*2*layout->wpt(1)));
-//      off_b_n = is_b_row ? xor_(off_b_n, b_phase) : off_b_n;
-//      b_offs[{r, c}] = add(off_b,
-//                       add(mul(off_b_n, i32(8*stride_b_n)),
-//                                           mul(off_b_k, i32(8*stride_b_k))));
-//    }
-//  }
-//  Value *tidr8  = urem(lane, i32(8));
   Value *phase_b = urem(udiv(tidr8, i32(per_phase_b)), i32(max_phase_b));
   Value* off_b0   = mul(tidr8, i32(ldb));
-  Value *off_bn  = mul(add(mul(udiv(lane, i32(16)), i32(layout->wpt(1))), mul(warp1, i32(1))), i32(8));
+  Value *off_bn  = urem(mul(add(mul(udiv(lane, i32(16)), i32(layout->wpt(1))), mul(warp1, i32(1))), i32(8)), i32(shape_b[1]));
   Value *off_bk  = mul(urem(udiv(lane, i32(8)), i32(2)), i32(8));
   off_b0 = add(off_b0, is_b_row ? off_bn : off_bk);
   Value* off_b1 = is_b_row ? off_bk : off_bn;
@@ -1017,12 +980,6 @@ void generator::visit_mma16816(ir::dot_inst* dot, ir::value *A, ir::value *B, ir
   std::vector<Value*> ptrs_a(num_ptr_a);
   for(int i = 0; i < num_ptr_a; i++)
     ptrs_a[i] = gep(pTA, {off_a[i]});
-
-//  Value *pTB = shmems_[B];
-//  std::map<std::pair<int,int>, Value*> pTBs;
-//  for(size_t r = 0; r < num_ptr_row_b; r++)
-//  for(size_t c = 0; c < num_ptr_col_b; c++)
-//    pTBs[{r, c}] = gep(pTB, {b_offs[{r,c}]});
   Value *pTB = shmems_[B];
   std::vector<Value*> ptrs_b(num_ptr_b);
   for(int i = 0; i < num_ptr_b; i++)
@@ -1057,9 +1014,6 @@ void generator::visit_mma16816(ir::dot_inst* dot, ir::value *A, ir::value *B, ir
       Value* ptrb = ptrs_b[(is_b_row ? n : K/16) % num_ptr_b];
       int step_bn = is_b_row ? n / (num_ptr_b)*(num_ptr_b) : n;
       int step_bk = is_b_row ? K : K / (num_ptr_b*8)*(num_ptr_b*8);
-
-//      int step_bn = n/(2*num_ptr_col_b)*(2*num_ptr_col_b)*layout->wpt(1)*layout->spw(1)*2;
-//      int step_bk = K/(16*num_ptr_row_b)*(16*num_ptr_row_b);
       InlineAsm *ld_b_fn = InlineAsm::get(ld_x4_ty, "ldmatrix.sync.aligned.m8n8.x4" + b_trans + ".shared.b16 "
                                                 "{$0, $1, $2, $3}, [$4 + " + std::to_string(2*step_bn*8*layout->wpt(1)*stride_b_n + 2*step_bk*stride_b_k) + "];", "=r,=r,=r,=r,r", false);
       Value *hbb = call(ld_x4_ty, ld_b_fn, {ptrb});
