@@ -220,8 +220,6 @@ std::unique_ptr<driver::module> function::make_bin(ir::module &module, driver::d
   codegen::generator isel(&axes, &layouts, &align, &allocation, &swizzle, target.get(), opt.num_warps);
   // run passes
   dce.run(module);
-//  ir::print(module, std::cout);
-
   disassociate.run(module);
   dce.run(module);
   peephole.run(module);
@@ -250,6 +248,7 @@ std::unique_ptr<driver::module> function::make_bin(ir::module &module, driver::d
   if(allocation.allocated_size() > device->max_shared_memory())
     throw exception::out_of_shared_memory();
   barriers.run(module);
+//  ir::print(module, std::cout);
   isel.visit(module, *llvm);
   std::unique_ptr<driver::module> res(driver::module::create(device, std::move(llvm)));
   if(res->spilled() > 256)

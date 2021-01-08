@@ -64,9 +64,10 @@ public:
   // cloning
   ir::instruction* clone() {
     ir::instruction* res = clone_impl();
-    for(auto it = op_begin(); it != op_end(); it++)
-      (*it)->add_use(res);
+//    for(auto it = op_begin(); it != op_end(); it++)
+//      (*it)->add_use(res);
     res->parent_ = nullptr;
+    res->users_.clear();
     return res;
   }
   // instruction id

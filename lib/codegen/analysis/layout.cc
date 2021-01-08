@@ -203,7 +203,7 @@ scanline_layout::scanline_layout(size_t num_warps,
         ptr = st->get_pointer_operand();
 
   unsigned i = order_[0];
-  int contiguous = 4;
+  int contiguous = 1;
   if(ptr){
     int nbits = ptr->get_type()->get_pointer_element_ty()->get_scalar_ty()->get_primitive_size_in_bits();
     contiguous = std::min<int>(align->contiguous(ptr)[i], 128 / nbits);
