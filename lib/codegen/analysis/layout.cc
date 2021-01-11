@@ -222,10 +222,6 @@ scanline_layout::scanline_layout(size_t num_warps,
     mts_[i] = clamp(num_threads, 1, shape_[i] / nts_[i]);
     num_threads = num_threads / mts_[i];
   }
-  /* sanity check */
-  unsigned effective_num_threads = 1;
-  for(size_t d = 0; d < shape_.size(); d++)
-    effective_num_threads *= mts_[d];
 }
 
 
@@ -301,20 +297,6 @@ shared_layout::shared_layout(data_layout *arg,
   }
   hmma_dot_a_ = hmma_dot_a;
   hmma_dot_b_ = hmma_dot_b;
-
-  // non-mma ordering
-  std::vector<int> col = {0, 1};
-  std::vector<int> row = {1, 0};
-  for(size_t s = 2; s < get_rank(); s++){
-    col.push_back(s);
-    row.push_back(s);
-  }
-  bool is_nonhmma_dot_a = dot_a && !hmma_dot_a;
-  bool is_nonhmma_dot_b = dot_b && !hmma_dot_b;
-  if(is_nonhmma_dot_a)
-    order_ = is_trans(dot_a) ? row : col;
-  else if(is_nonhmma_dot_b)
-    order_ = is_trans(dot_b) ? col : row;
 
   // size
   size_ = ty_->get_primitive_size_in_bits() / 8;

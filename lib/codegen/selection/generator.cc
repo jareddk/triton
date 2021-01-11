@@ -894,8 +894,6 @@ void generator::visit_mma16816(ir::dot_inst* dot, ir::value *A, ir::value *B, ir
   analysis::mma_layout* layout = layouts_->get(dot)->to_mma();
   analysis::shared_layout* layout_a = (analysis::shared_layout*)layouts_->get(dot->get_operand(0));
   analysis::shared_layout* layout_b = (analysis::shared_layout*)layouts_->get(dot->get_operand(1));
-
-
   bool is_a_row = ord_a[0] == 1;
   bool is_b_row = ord_b[0] == 1;
   std::string a_trans = is_a_row ? "" : ".trans";
@@ -949,6 +947,8 @@ void generator::visit_mma16816(ir::dot_inst* dot, ir::value *A, ir::value *B, ir
   Value* off_a0   = mul(tidr8, i32(lda));
   Value *off_am  = mul(add(urem(udiv(lane, i32(8)), i32(2)), mul(warp0, i32(2))), i32(8));
   Value *off_ak  = mul(udiv(lane, i32(16)), i32(8));
+  off_am = urem(off_am, i32(shape_a[0]));
+  off_ak = urem(off_ak, i32(shape_a[1]));
   off_a0 = add(off_a0, is_a_row ? off_ak : off_am);
   Value* off_a1 = is_a_row ? off_am : off_ak;
   std::vector<Value*> off_a(num_ptr_a);
@@ -962,8 +962,10 @@ void generator::visit_mma16816(ir::dot_inst* dot, ir::value *A, ir::value *B, ir
 
   Value *phase_b = urem(udiv(tidr8, i32(per_phase_b)), i32(max_phase_b));
   Value* off_b0   = mul(tidr8, i32(ldb));
-  Value *off_bn  = urem(mul(add(mul(udiv(lane, i32(16)), i32(layout->wpt(1))), mul(warp1, i32(1))), i32(8)), i32(shape_b[1]));
+  Value *off_bn  = mul(add(mul(udiv(lane, i32(16)), i32(layout->wpt(1))), mul(warp1, i32(1))), i32(8));
   Value *off_bk  = mul(urem(udiv(lane, i32(8)), i32(2)), i32(8));
+  off_bn = urem(off_bn, i32(shape_b[1]));
+  off_bk = urem(off_bk, i32(shape_b[0]));
   off_b0 = add(off_b0, is_b_row ? off_bn : off_bk);
   Value* off_b1 = is_b_row ? off_bk : off_bn;
   std::vector<Value*> off_b(num_ptr_b);
@@ -976,14 +978,14 @@ void generator::visit_mma16816(ir::dot_inst* dot, ir::value *A, ir::value *B, ir
   }
 
   builder_->SetInsertPoint(CurrBB);
-  Value *pTA = shmems_[A];
+  // A pointer
   std::vector<Value*> ptrs_a(num_ptr_a);
   for(int i = 0; i < num_ptr_a; i++)
-    ptrs_a[i] = gep(pTA, {off_a[i]});
-  Value *pTB = shmems_[B];
+    ptrs_a[i] = gep(shmems_[A], {off_a[i]});
+  // B pointer
   std::vector<Value*> ptrs_b(num_ptr_b);
   for(int i = 0; i < num_ptr_b; i++)
-    ptrs_b[i] = gep(pTB, {off_b[i]});
+    ptrs_b[i] = gep(shmems_[B], {off_b[i]});
 
   FunctionType *mma_ty = FunctionType::get(fp32_pack4_ty, std::vector<llvm::Type*>{fp16x2_ty, fp16x2_ty, fp16x2_ty, fp16x2_ty, fp16x2_ty, fp16x2_ty, fp32_ty, fp32_ty, fp32_ty, fp32_ty}, false);
   InlineAsm *mma_fn = InlineAsm::get(mma_ty, "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 "
@@ -1056,9 +1058,95 @@ void generator::visit_mma16816(ir::dot_inst* dot, ir::value *A, ir::value *B, ir
 /**
  * \brief Code Generation for FMA-based `dot` (FP32, FP64, Default)
  */
-void generator::visit_fmadot(ir::dot_inst* dot, ir::value* A, ir::value* B, ir::value* D, unsigned NK,
-                                   Type *c_ty, Function *f_mul_add) {
-  throw std::runtime_error("TODO: v1.0 not complete");
+void generator::visit_fmadot(ir::dot_inst* C, ir::value* A, ir::value* B, ir::value* D, unsigned NK, Type *c_ty, Function *f_mul_add) {
+  auto shape_c = C->get_type()->get_tile_shapes();
+  auto shape_a = A->get_type()->get_tile_shapes();
+  auto shape_b = B->get_type()->get_tile_shapes();
+  auto ord_a = layouts_->get(A)->get_order();
+  auto ord_b = layouts_->get(B)->get_order();
+  analysis::scanline_layout* layout_c = layouts_->get(C)->to_scanline();
+  analysis::shared_layout* layout_a = (analysis::shared_layout*)layouts_->get(C->get_operand(0));
+  analysis::shared_layout* layout_b = (analysis::shared_layout*)layouts_->get(C->get_operand(1));
+  bool is_a_row = ord_a[0] == 1;
+  bool is_b_row = ord_b[0] == 1;
+  std::string a_trans = is_a_row ? "" : ".trans";
+  std::string b_trans = is_b_row ? ".trans" : "";
+  int stride_a_m = is_a_row ? shape_a[1] : 1;
+  int stride_a_k = is_a_row ? 1 : shape_a[0];
+  int stride_b_n = is_b_row ? 1 : shape_b[0];
+  int stride_b_k = is_b_row ? shape_b[1] : 1;
+  int stride_a0 = is_a_row ? stride_a_k : stride_a_m;
+  int stride_a1 = is_a_row ? stride_a_m : stride_a_k;
+  int stride_b0 = is_b_row ? stride_b_n : stride_b_k;
+  int stride_b1 = is_b_row ? stride_b_k : stride_b_n;
+  int lda = is_a_row ? stride_a_m : stride_a_k;
+  int ldb = is_b_row ? stride_b_k : stride_b_n;
+  int per_phase_a = swizzle_->get_per_phase(layout_a);
+  int max_phase_a = swizzle_->get_max_phase(layout_a);
+  int per_phase_b = swizzle_->get_per_phase(layout_b);
+  int max_phase_b = swizzle_->get_max_phase(layout_b);
+  int num_ptr_a   = 8;
+  int num_ptr_b   = 8;
+  int vec_a = 2;
+  int vec_b = 4;
+  distributed_axis ax_m = axes_.at(a_axes_->get(C, 0));
+  distributed_axis ax_n = axes_.at(a_axes_->get(C, 1));
+//  Value* thread = tgt_->get_local_id(mod_, *builder_, 0);
+
+  Value* off_a0 = is_a_row ? i32(0) : mul(ax_m.thread_id, i32(ax_m.contiguous));
+  Value* off_a1 = is_a_row ? mul(ax_m.thread_id, i32(ax_m.contiguous)): i32(0);
+  std::vector<Value*> off_a(num_ptr_a);
+  for(int i = 0; i < num_ptr_a; i++){
+//    Value* off_a0i = add(off_a0, i32(is_a_row ? vec_a : layout_c->mts(0)*vec_a));
+//    off_a0i = exact_udiv(off_a0i, i32(vec_a));
+//    off_a0i = xor_(off_a0i, phase_a);
+//    off_a0i = mul(off_a0i, i32(vec_a));
+    off_a[i] = add(mul(off_a0, i32(stride_a0)), mul(off_a1, i32(stride_a1)));
+  }
+  Value* off_b0 = is_b_row ? mul(ax_n.thread_id, i32(ax_n.contiguous)): i32(0);
+  Value* off_b1 = is_b_row ? i32(0) : mul(ax_n.thread_id, i32(ax_n.contiguous));
+  std::vector<Value*> off_b(num_ptr_b);
+  for(int i = 0; i < num_ptr_b; i++){
+//    Value* off_b0i = add(off_b0, i32(is_b_row ? layout_c->mts(1)*vec_b : vec_b));
+//    off_b0i = exact_udiv(off_b0i, i32(vec_b));
+//    off_b0i = xor_(off_b0i, phase_b);
+//    off_b0i = mul(off_b0i, i32(vec_b));
+    off_b[i] = add(mul(off_b0, i32(stride_b0)), mul(off_b1, i32(stride_b1)));
+  }
+  std::vector<Value*> ptrs_a(num_ptr_a);
+  for(int i = 0; i < num_ptr_a; i++)
+    ptrs_a[i] = gep(shmems_[A], off_a[i]);
+  std::vector<Value*> ptrs_b(num_ptr_b);
+  for(int i = 0; i < num_ptr_b; i++)
+    ptrs_b[i] = gep(shmems_[B], off_b[i]);
+
+  std::map<indices_t, Value*> ret = vals_[D];
+  std::map<std::pair<int, int>, Value*> has, hbs;
+  for(unsigned k = 0; k < NK; k++){
+    int z = 0;
+    for(unsigned m = 0; m < shape_c[0]; m+=layout_c->mts(0)*layout_c->nts(0))
+    for(unsigned n = 0; n < shape_c[1]; n+=layout_c->mts(1)*layout_c->nts(1))
+    for(unsigned mm = 0; mm < layout_c->nts(0); mm++)
+    for(unsigned nn = 0; nn < layout_c->nts(1); nn++)
+    {
+      if(has.find({m + mm, k}) == has.end()){
+        Value* pa = gep(ptrs_a[0], i32((m + mm)*stride_a_m + k*stride_a_k));
+        Value* va = load(pa);
+        has[{m + mm, k}] = va;
+      }
+      if(hbs.find({n + nn, k}) == hbs.end()){
+        Value* pb = gep(ptrs_b[0], i32((n + nn)*stride_b_n + k*stride_b_k));
+        Value* vb = load(pb);
+        hbs[{n + nn, k}] = vb;
+      }
+      ret[idxs_[C].at(z)] = call(f_mul_add, {has[{m+mm,k}], hbs[{n+nn, k}], ret[idxs_[C].at(z)]});
+      z++;
+    }
+  }
+
+  for(indices_t idx: idxs_.at(C)){
+    vals_[C][idx] = ret[idx];
+  }
 }
 
 /**
