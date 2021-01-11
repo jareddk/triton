@@ -101,10 +101,12 @@ class kernel:
   def __call__(self, *args, **kwargs):
     if 'TRITON_DEBUG_MODE' in os.environ:
       _args = args
-      args = [x for x in args]
+      args = [x.clone() if isinstance(x, torch.Tensor) else x for x in _args]
       for i in range(len(args)):
         if isinstance(args[i], torch.Tensor):
-          args[i] = torch.ops.triton.raw_like(args[i])
+          args[i] = torch.ops.triton.cuda_empty_like(args[i])
+          args[i].copy_(_args[i])
+      torch.cuda.synchronize()
     for x in args:
       if isinstance(x, torch.Tensor):
         device = x.device.index
@@ -126,6 +128,8 @@ class kernel:
     constants = list(kwargs['constants'].values()) if 'constants' in kwargs else []
     torch.ops.triton.launch_kernel(self.op_id, device, params, names, constants)
     if 'TRITON_DEBUG_MODE' in os.environ:
+      torch.cuda.synchronize()
       for i in range(len(args)):
         if isinstance(args[i], torch.Tensor):
-          _args[i].copy_(args[i])
+          _args[i].copy_(args[i].clone())
+      args = _args
