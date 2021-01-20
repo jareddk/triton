@@ -160,11 +160,11 @@ __global__ void matmul(TYPE * A __noalias __readonly __aligned(16),
             }
             if m_k_16:
                 defines['K_MULTIPLE_OF_TK'] = '1'
-            _matmul.kernel[key] = triton.kernel(_matmul.src, device=c.device, num_warps=_matmul.num_warps, defines=defines)
+            _matmul.kernel[key] = triton.kernel(_matmul.src, num_warps=_matmul.num_warps, defines=defines)
         kernel = _matmul.kernel[key]
         # enqueue
-        kernel([a, b, c, 1., M, N, K, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1), _matmul.get_locks(c.device)], 
-               grid_0 = triton.cdiv(M, _matmul.TM)*triton.cdiv(N, _matmul.TN))
+        kernel(a, b, c, 1., M, N, K, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1), _matmul.get_locks(c.device), 
+               grid = lambda opt: [triton.cdiv(M, opt.d('TM'))*triton.cdiv(N, opt.d('TN'))])
         return c
 
     @staticmethod

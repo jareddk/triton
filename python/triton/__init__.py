@@ -1,4 +1,5 @@
 from .kernel import *
+from .ops import *
 
 # clean-up libtriton resources
 import atexit

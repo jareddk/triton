@@ -111,7 +111,7 @@ ret_t superblock(torch::Tensor layout, int start_width) {
   return ret;
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
-{
-    m.def("superblock", &superblock, "super-blocking for block-sparse matrix multiplication");
+
+void init_superblocking(pybind11::module &m) {
+  m.def("superblock", &superblock, "super-blocking for block-sparse matrix multiplication");
 }

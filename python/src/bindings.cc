@@ -98,6 +98,8 @@ std::vector<rt::arg_type> get_fn_signature(const std::string& src,
 typedef triton::runtime::options_t options_t;
 typedef triton::runtime::options_space_t options_space_t;
 
+void init_superblocking(pybind11::module &m);
+
 PYBIND11_MODULE(libtriton, m) {
     m.doc() = "Python bindings to the C++ Triton API";
 
@@ -137,5 +139,6 @@ PYBIND11_MODULE(libtriton, m) {
     m.def("delete_fn", &delete_fn);
     m.def("make_op_id", &make_op_id);
     m.def("cleanup", &cleanup);
-    ;
+
+    init_superblocking(m);
 }
