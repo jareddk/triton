@@ -105,7 +105,7 @@ __global__ void matmul(TYPE * A __noalias __readonly __aligned(16),
     TN = 128
     TK = 32
     TZ = 1
-    num_warps = 4
+    num_warps = [4]
     kernel = dict()
 
     @staticmethod

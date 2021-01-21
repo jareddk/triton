@@ -83,7 +83,17 @@ void triton_dot(drv::context* context,  drv::stream* stream, bool AT, bool BT,
   auto da     = std::shared_ptr<drv::buffer>(drv::buffer::create(context, M*K*dt_nbytes));
   auto db     = std::shared_ptr<drv::buffer>(drv::buffer::create(context, K*N*dt_nbytes));
   auto dlocks = std::shared_ptr<drv::buffer>(drv::buffer::create(context, 1024*1024*2*4));
-//  ((drv::cu_buffer*)dlocks.get())->set_zero(stream, dlocks->size());
+  // initialize buffers
+  std::vector<T> hc(M*N);
+  std::vector<T> ha(M*K);
+  std::vector<T> hb(K*N);
+  for(size_t i = 0; i < ha.size(); i++)
+    ha[i] = (float)rand()/RAND_MAX;
+  for(size_t i = 0; i < hb.size(); i++)
+    hb[i] = (float)rand()/RAND_MAX;
+  // copy buffer
+  stream->write(&*da, true, 0, ha);
+  stream->write(&*db, true, 0, hb);
 
   // macros
   rt::options_space_t opts;
@@ -161,17 +171,7 @@ void triton_dot(drv::context* context,  drv::stream* stream, bool AT, bool BT,
   // test triton
   if(mode == TEST){
     srand(0);
-    // initialize buffers
-    std::vector<T> hc(M*N);
-    std::vector<T> ha(M*K);
-    std::vector<T> hb(K*N);
-    for(size_t i = 0; i < ha.size(); i++)
-      ha[i] = (float)rand()/RAND_MAX;
-    for(size_t i = 0; i < hb.size(); i++)
-      hb[i] = (float)rand()/RAND_MAX;
-    // copy buffer
-    stream->write(&*da, true, 0, ha);
-    stream->write(&*db, true, 0, hb);
+
     // run kernel
     function((void**)oss.str().data(), oss.str().size(), grid, stream, device);
     // write back
