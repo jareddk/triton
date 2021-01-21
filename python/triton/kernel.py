@@ -57,7 +57,7 @@ def synchronize(device):
 
 class kernel:
 
-  def __init__(self, src, defines = dict(), num_warps = [2, 4, 8]):
+  def __init__(self, src, device, defines = dict(), num_warps = [2, 4, 8]):
     self.src = src
     self.opt = libtriton.options_space()
     self.opt.defines = [(k, th_to_triton(v)) for k, v in defines.items()]
@@ -67,6 +67,9 @@ class kernel:
     arg_types = libtriton.get_fn_signature(self.src, self.opt)
     size = sum([sizes[x] for x in arg_types])
     self.tys = ''.join([codes[x] for x in arg_types])
+    self.is_debug = 'TRITON_DEBUG' in os.environ
+    self.device = -1 if device.index is None else device.index
+    libtriton.register_fn((self.op_id, self.device), self.src, self.opt)
 
   def asm(self, mode, device, **kwargs):
     dev_id = device.index
@@ -99,7 +102,7 @@ class kernel:
     return libtriton.get_fn_asm((self.op_id, dev_id), mode, opt)
 
   def __call__(self, *args, **kwargs):
-    if 'TRITON_DEBUG_MODE' in os.environ:
+    if self.is_debug:
       _args = args
       args = [x.clone() if isinstance(x, torch.Tensor) else x for x in _args]
       for i in range(len(args)):
@@ -107,27 +110,17 @@ class kernel:
           args[i] = torch.ops.triton.cuda_empty_like(args[i])
           args[i].copy_(_args[i])
       torch.cuda.synchronize()
-    for x in args:
-      if isinstance(x, torch.Tensor):
-        device = x.device.index
-        device = -1 if device is None else device
-        break
-    # lazily register function for device
-    libtriton.register_fn((self.op_id, device), self.src, self.opt)
     # launch grid
     if 'grid' not in kwargs:
       raise RuntimeError('Must provide grid for kernel launch')
     grid = kwargs['grid']
-    libtriton.register_grid((self.op_id, device), grid)
-    # re-allocate buffers for auto-tuning
-    if 'autotune_buf' in kwargs:
-      pass
+    libtriton.register_grid((self.op_id, self.device), grid)
     # launch
     params    = pack(self.tys, *[x.data_ptr() if isinstance(x, torch.Tensor) else x for x in args])
     names     = list(kwargs['constants'].keys()) if 'constants' in kwargs else []
     constants = list(kwargs['constants'].values()) if 'constants' in kwargs else []
-    torch.ops.triton.launch_kernel(self.op_id, device, params, names, constants)
-    if 'TRITON_DEBUG_MODE' in os.environ:
+    torch.ops.triton.launch_kernel(self.op_id, self.device, params, names, constants)
+    if self.is_debug:
       torch.cuda.synchronize()
       for i in range(len(args)):
         if isinstance(args[i], torch.Tensor):
