@@ -73,7 +73,6 @@ struct options_space_t {
   typedef std::pair<std::string, std::vector<std::string>> define_t;
   std::vector<define_t> defines;
   std::vector<int> num_warps;
-  std::vector<int> recompile_key;
 };
 
 struct options_t {
@@ -125,9 +124,6 @@ private:
   };
 
 private:
-  typedef std::pair<driver::device*, std::vector<int32_t>> cache_key_t;
-
-private:
   // cache
   static std::string get_cache_prefix();
   // make
@@ -143,15 +139,15 @@ public:
   static std::string preheader();
 
 public:
-  function(const std::string& src, const options_space_t& opt, const std::string &cache_ref = "");
-  void operator()(void** args, size_t args_size, const grid_t& grid, driver::stream* stream, driver::device* device);
-  void operator()(void** args, size_t args_size, const grid_fn_ty& grid, driver::stream *stream, driver::device* device);
+  function(const std::string& src, const options_space_t& opt, driver::device *device);
+  void operator()(void** args, size_t args_size, const grid_t& grid, driver::stream* stream);
+  void operator()(void** args, size_t args_size, const grid_fn_ty& grid, driver::stream *stream);
   void set_cst(const char* name, void* data, size_t n_bytes);
   std::string get_asm(asm_mode_t mode, driver::device *device, const options_t& opt);
 
 private:
   std::map<std::string, std::vector<char>> cst_;
-  // pre-compilation
+  driver::device* device_;
   ir::context ctx_;
   std::string src_;
   options_space_t opt_;
@@ -159,10 +155,7 @@ private:
   std::map<options_t, std::unique_ptr<caller>> callers_;
   std::vector<int> args_off_;
   size_t args_size_;
-  // caching
-  std::string cache_ref_;
-  std::string cache_path_;
-  std::map<cache_key_t, caller*> cache_;
+  std::map<std::vector<int32_t>, caller*> cache_;
 };
 
 }

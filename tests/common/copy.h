@@ -114,7 +114,7 @@ void triton_copy_nd(drv::context* context, drv::stream* stream, const std::vecto
   opt.num_warps = {4};
 
   // kernel
-  rt::function function(src::copy_nd[rank - 1], opt);
+  rt::function function(src::copy_nd[rank - 1], opt, device);
 
   std::stringstream oss;
   rt::add_arg(oss, *dx->cu());
@@ -129,7 +129,7 @@ void triton_copy_nd(drv::context* context, drv::stream* stream, const std::vecto
   // metrics
   if(mode == BENCH){
     auto gbps = [&](double ns) { return 2 * size * dtsize / (ns * 1e-9) * 1e-9; };
-    double triton_ns = triton::tools::bench([&]() { function((void**)oss.str().data(), oss.str().size(), grid, stream, device);}, stream);
+    double triton_ns = triton::tools::bench([&]() { function((void**)oss.str().data(), oss.str().size(), grid, stream);}, stream);
     bench.push_back(gbps(triton_ns));
   }
 
@@ -141,7 +141,7 @@ void triton_copy_nd(drv::context* context, drv::stream* stream, const std::vecto
     for(size_t i = 0; i < hx.size(); i++)
       hx[i] = static_cast<T>((float)rand()/RAND_MAX);
     stream->write(&*dx, true, 0, hx);
-    function((void**)oss.str().data(), oss.str().size(), grid, stream, device);
+    function((void**)oss.str().data(), oss.str().size(), grid, stream);
     stream->synchronize();
     stream->read(&*dy, true, 0, hy);
     cc_copy_nd(hx, ry, shape, x_order, y_order);

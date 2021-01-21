@@ -114,14 +114,14 @@ void triton_conv(drv::context* context, drv::stream* stream,
   rt::add_arg(oss, Q);
   rt::add_arg(oss, 1);
   // kernels
-  rt::function function(src::conv, opt);
+  rt::function function(src::conv, opt, device);
   auto grid = [Z,P,Q,CO](const rt::options_t& x) {
     return rt::grid_t{ceil(Z*P*Q, x.D<int>("TM")),
                       ceil(CO   , x.D<int>("TN")),
                       (size_t)x.D<int>("TZ")};
   };
   auto tflops = [&](double nanosec) { return 2.*Z*P*Q*CI*CO*R*S / nanosec * 1e-3; };
-  double triton_ns = triton::tools::bench([&]() { function((void**)oss.str().data(), oss.str().size(), grid, stream, device);}, stream);
+  double triton_ns = triton::tools::bench([&]() { function((void**)oss.str().data(), oss.str().size(), grid, stream);}, stream);
   bench.push_back(tflops(triton_ns));
 }
 

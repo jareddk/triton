@@ -135,7 +135,7 @@ void triton_dot(drv::context* context,  drv::stream* stream, bool AT, bool BT,
   rt::add_arg(oss, ldc);
   rt::add_arg(oss, *dlocks->cu());
   // kernel
-  rt::function function(src::dot, opts);
+  rt::function function(src::dot, opts, device);
   // grid
   auto grid = [M, N](const rt::options_t& x) {
     return rt::grid_t{ceil(M, x.D<int>("TM"))*
@@ -146,7 +146,7 @@ void triton_dot(drv::context* context,  drv::stream* stream, bool AT, bool BT,
   // metrics
   if(mode == BENCH){
     auto tflops = [&](double nanosec) { return 2.*M*N*K / nanosec * 1e-3; };
-    double triton_ns = triton::tools::bench([&]() { function((void**)oss.str().data(), oss.str().size(), grid, stream, device);}, stream);
+    double triton_ns = triton::tools::bench([&]() { function((void**)oss.str().data(), oss.str().size(), grid, stream);}, stream);
     bench.push_back(tflops(triton_ns));
 
     // cublas
@@ -173,7 +173,7 @@ void triton_dot(drv::context* context,  drv::stream* stream, bool AT, bool BT,
     srand(0);
 
     // run kernel
-    function((void**)oss.str().data(), oss.str().size(), grid, stream, device);
+    function((void**)oss.str().data(), oss.str().size(), grid, stream);
     // write back
     stream->synchronize();
     // compare with CPU

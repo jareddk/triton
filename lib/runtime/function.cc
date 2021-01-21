@@ -472,31 +472,15 @@ std::string function::get_cache_prefix() {
 
 function::function(const std::string &src,
                    const options_space_t& opt,
-                   const std::string &cache_ref):
-    src_(src), opt_(opt), cache_ref_(cache_ref) {
-  // hash source code
-  unsigned char hash[20];
-  sha1::calc((void*)src_.data(), src_.size(), hash);
-  // create cache path
-  char _hex[40];
-  sha1::toHexString(hash, _hex);
-  std::string hex(_hex, _hex + 40);
-  cache_path_ = get_cache_prefix() + hex + "/";
-  tools::mkpath(cache_path_);
-  // append pre-header to source
+                   driver::device *device):
+    device_(device), src_(src), opt_(opt) {
   src_ = preheader() + src_;
+  precompile(device_, opt_);
 }
 
-void function::operator()(void** args, size_t args_size, const grid_fn_ty& grid_fn, driver::stream *stream, driver::device *device) {
-  // pre-compile kernels
-  if(callers_.empty()){
-    precompile(device, opt_);
-  }
-  // re-tuning key
-  cache_key_t key;
-  key.first = device;
-  key.second = callers_.begin()->second->retune();
+void function::operator()(void** args, size_t args_size, const grid_fn_ty& grid_fn, driver::stream *stream) {
   // auto-tune if necessary
+  auto key = callers_.begin()->second->retune();
   auto it = cache_.find(key);
   if(it == cache_.end()){
     auto best = autotune(stream, grid_fn, args, args_size);
@@ -506,11 +490,8 @@ void function::operator()(void** args, size_t args_size, const grid_fn_ty& grid_
   (*it->second)(stream, grid_fn(it->second->opt()), args, args_size, cst_);
 }
 
-void function::operator()(void** args,
-                          size_t args_size,
-                          const grid_t& grid,
-                          driver::stream* stream, driver::device *device) {
-  return this->operator()(args, args_size, [&grid](const options_t&){ return grid; }, stream, device);
+void function::operator()(void** args, size_t args_size, const grid_t& grid, driver::stream* stream) {
+  return this->operator()(args, args_size, [&grid](const options_t&){ return grid; }, stream);
 }
 
 
