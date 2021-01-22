@@ -166,7 +166,7 @@ function::caller::caller(ir::function *ir,
 }
 
 
-void function::caller::operator ()(driver::stream *stream, const grid_t& _grid, void** args, size_t args_size, const std::map<std::string, std::vector<char>>& csts) const {
+void function::caller::operator ()(driver::stream *stream, const grid_t& _grid, void* args, size_t args_size, const std::map<std::string, std::vector<char>>& csts) const {
   // copy constants
   for(const auto& cst: csts){
     std::unique_ptr<driver::buffer> buffer = parent()->symbol(cst.first.c_str());
@@ -372,7 +372,7 @@ std::string function::get_asm(asm_mode_t mode, driver::device* device, const opt
 
 // returns program with best compilation options for given parameter
 function::caller* function::autotune(driver::stream* stream, const grid_fn_ty& grid_fn,
-                                     void** args, size_t args_size) {
+                                     void* args, size_t args_size) {
   // fast path -- no autotuning necessary
   if(callers_.size() == 1)
     return &*callers_.begin()->second;
@@ -393,7 +393,7 @@ function::caller* function::autotune(driver::stream* stream, const grid_fn_ty& g
 }
 
 // set copy host buffer "data" into constant memory buffer "name"
-void function::set_cst(const char* name, void* data, size_t n_bytes) {
+void function::set_cst(const char* name, char* data, size_t n_bytes) {
    cst_[std::string(name)] = std::vector<char>((char*)data, (char*)data + n_bytes);
 }
 
@@ -474,23 +474,35 @@ function::function(const std::string &src,
                    const options_space_t& opt,
                    driver::device *device):
     device_(device), src_(src), opt_(opt) {
+  // compile kernels
   src_ = preheader() + src_;
   precompile(device_, opt_);
+  // argument size and offset
+  auto tys = callers_.begin()->second->param_tys();
+  size_t curr = 0;
+  for(arg_type ty: tys){
+    arg_size_.push_back(size_of(ty));
+    arg_off_.push_back(curr);
+    curr += arg_size_.back();
+  }
 }
 
-void function::operator()(void** args, size_t args_size, const grid_fn_ty& grid_fn, driver::stream *stream) {
+void function::operator()(void* args, size_t args_size, const grid_fn_ty& grid_fn, driver::stream *stream) {
   // auto-tune if necessary
-  auto key = callers_.begin()->second->retune();
-  auto it = cache_.find(key);
+  auto idx = callers_.begin()->second->retune();
+  std::vector<uint64_t> key(idx.size(), 0);
+  for(size_t i = 0; i < key.size(); i++)
+    std::memcpy((void*)&key[i], (void*)((char*)args + arg_off_[idx[i]]), arg_size_[idx[i]]);
+  auto it = cache_.find(idx);
   if(it == cache_.end()){
     auto best = autotune(stream, grid_fn, args, args_size);
-    it = cache_.insert({key, best}).first;
+    it = cache_.insert({idx, best}).first;
   }
   // run
   (*it->second)(stream, grid_fn(it->second->opt()), args, args_size, cst_);
 }
 
-void function::operator()(void** args, size_t args_size, const grid_t& grid, driver::stream* stream) {
+void function::operator()(void* args, size_t args_size, const grid_t& grid, driver::stream* stream) {
   return this->operator()(args, args_size, [&grid](const options_t&){ return grid; }, stream);
 }
 

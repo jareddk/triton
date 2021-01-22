@@ -112,7 +112,7 @@ private:
 
     std::vector<int> retune() const { return retune_; }
     // entry points
-    void operator()(driver::stream *stream, const grid_t& grid, void **args, size_t args_size, const std::map<std::string, std::vector<char>>& = {}) const;
+    void operator()(driver::stream *stream, const grid_t& grid, void* args, size_t args_size, const std::map<std::string, std::vector<char>>& = {}) const;
 
   private:
     std::shared_ptr<driver::kernel> bin_;
@@ -133,16 +133,16 @@ private:
   void make(driver::device *device, options_t opt);
   void precompile(driver::device *device, const options_space_t& tuning_space);
   // autotune
-  caller* autotune(driver::stream *stream, const grid_fn_ty& grid, void **args, size_t args_size);
+  caller* autotune(driver::stream *stream, const grid_fn_ty& grid, void* args, size_t args_size);
 
 public:
   static std::string preheader();
 
 public:
   function(const std::string& src, const options_space_t& opt, driver::device *device);
-  void operator()(void** args, size_t args_size, const grid_t& grid, driver::stream* stream);
-  void operator()(void** args, size_t args_size, const grid_fn_ty& grid, driver::stream *stream);
-  void set_cst(const char* name, void* data, size_t n_bytes);
+  void operator()(void* args, size_t args_size, const grid_t& grid, driver::stream* stream);
+  void operator()(void* args, size_t args_size, const grid_fn_ty& grid, driver::stream *stream);
+  void set_cst(const char* name, char* data, size_t n_bytes);
   std::string get_asm(asm_mode_t mode, driver::device *device, const options_t& opt);
 
 private:
@@ -153,7 +153,8 @@ private:
   options_space_t opt_;
   std::set<options_t> compiled_;
   std::map<options_t, std::unique_ptr<caller>> callers_;
-  std::vector<int> args_off_;
+  std::vector<int> arg_off_;
+  std::vector<int> arg_size_;
   size_t args_size_;
   std::map<std::vector<int32_t>, caller*> cache_;
 };
